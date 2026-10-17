@@ -3,7 +3,7 @@ services:
     image: postgres:16
     environment:
       POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -21,11 +21,11 @@ services:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: app
-      KC_DB_PASSWORD: app
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-app}
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
-      # tokeny mają iss = localhost:8180 także gdy backend łączy się przez keycloak:8080
-      KC_HOSTNAME: http://localhost:8180
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # tokeny mają iss = ten adres także gdy backend łączy się przez keycloak:8080
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8180}
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       KC_HEALTH_ENABLED: "true"
       # podstawiane w realm-export.json przy imporcie; prawdziwe wartości tylko w .env
@@ -50,8 +50,8 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/reservations
       SPRING_DATASOURCE_USERNAME: app
-      SPRING_DATASOURCE_PASSWORD: app
-      KEYCLOAK_ISSUER: http://localhost:8180/realms/reservations
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8180}/realms/reservations
     ports: ["8080:8080"]
     depends_on:
       postgres:
