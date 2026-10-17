@@ -23,10 +23,11 @@ Repo → Settings → Secrets and variables → Actions:
 |----------------|--------------------------------------|
 | `VPS_HOST`     | IP serwera                           |
 | `VPS_USER`     | nazwa użytkownika                    |
-| `VPS_PASSWORD` | hasło użytkownika                    |
+| `VPS_SSH_KEY`  | hasło użytkownika albo klucz prywatny (`-----BEGIN …`) |
 | `VPS_PORT`     | port SSH (opcjonalny, domyślnie 22)  |
 
-Serwer musi pozwalać na logowanie hasłem (`PasswordAuthentication yes` w `sshd_config`).
+Workflow rozpoznaje klucz po nagłówku `-----BEGIN`; każdą inną wartość traktuje jako hasło
+(serwer musi wtedy pozwalać na `PasswordAuthentication yes`).
 
 ## 3. Plik `.env` na serwerze
 

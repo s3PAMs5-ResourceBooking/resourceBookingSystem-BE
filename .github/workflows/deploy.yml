@@ -19,7 +19,8 @@ permissions:
 env:
   # względem katalogu domowego użytkownika na VPS
   DEPLOY_DIR: resource-booking
-  SSHPASS: ${{ secrets.VPS_PASSWORD }}
+  # VPS_SSH_KEY: klucz prywatny (-----BEGIN ...) albo hasło użytkownika
+  VPS_SECRET: ${{ secrets.VPS_SSH_KEY || secrets.VPS_PASSWORD }}
   VPS: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
   VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
 
@@ -62,17 +63,28 @@ jobs:
 
       - name: Configure SSH
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
           install -m 700 -d ~/.ssh
           ssh-keyscan -p "$VPS_PORT" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+          if printf '%s' "$VPS_SECRET" | grep -q -- '-----BEGIN'; then
+            echo "$VPS_SECRET" > ~/.ssh/id_deploy
+            chmod 600 ~/.ssh/id_deploy
+            echo "SSH_CMD=ssh -i $HOME/.ssh/id_deploy -p $VPS_PORT" >> "$GITHUB_ENV"
+          else
+            sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+            echo "SSH_CMD=sshpass -e ssh -p $VPS_PORT" >> "$GITHUB_ENV"
+          fi
 
       - name: Copy compose files
+        env:
+          SSHPASS: ${{ env.VPS_SECRET }}
         run: |
-          tar czf - docker-compose.yml docker-compose.prod.yml docker keycloak             | sshpass -e ssh -p "$VPS_PORT" "$VPS" "mkdir -p $DEPLOY_DIR && tar xzf - -C $DEPLOY_DIR"
+          tar czf - docker-compose.yml docker-compose.prod.yml docker keycloak | $SSH_CMD "$VPS" "mkdir -p $DEPLOY_DIR && tar xzf - -C $DEPLOY_DIR"
 
       - name: Pull and restart
+        env:
+          SSHPASS: ${{ env.VPS_SECRET }}
         run: |
-          sshpass -e ssh -p "$VPS_PORT" "$VPS" bash -s <<EOF
+          $SSH_CMD "$VPS" bash -s <<EOF
           set -euo pipefail
           cd $DEPLOY_DIR
           test -f .env || { echo "Brak ~/$DEPLOY_DIR/.env — utwórz go na podstawie .env.example"; exit 1; }
@@ -86,5 +98,7 @@ jobs:
           EOF
 
       - name: Wait for backend health
+        env:
+          SSHPASS: ${{ env.VPS_SECRET }}
         run: |
-          sshpass -e ssh -p "$VPS_PORT" "$VPS"             'for i in $(seq 1 30); do curl -fs http://127.0.0.1:8080/actuator/health && exit 0; sleep 5; done; exit 1'
+          $SSH_CMD "$VPS"             'for i in $(seq 1 30); do curl -fs http://127.0.0.1:8080/actuator/health && exit 0; sleep 5; done; exit 1'
