@@ -1,4 +1,4 @@
-package com.example.resourceBookingSystem;
+package pl.rewak.reservations;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
