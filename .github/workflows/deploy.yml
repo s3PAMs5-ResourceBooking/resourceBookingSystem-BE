@@ -1,0 +1,90 @@
+name: Deploy
+
+# Po zielonym CI na dev (albo ręcznie z zakładki Actions) wdraża na VPS.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # względem katalogu domowego użytkownika na VPS
+  DEPLOY_DIR: resource-booking
+  SSHPASS: ${{ secrets.VPS_PASSWORD }}
+  VPS: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+  VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Image name
+        id: image
+        env:
+          COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "sha=${repo}:${COMMIT::12}" >> "$GITHUB_OUTPUT"
+          echo "dev=${repo}:dev" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.sha }}
+            ${{ steps.image.outputs.dev }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Configure SSH
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -p "$VPS_PORT" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Copy compose files
+        run: |
+          tar czf - docker-compose.yml docker-compose.prod.yml docker keycloak             | sshpass -e ssh -p "$VPS_PORT" "$VPS" "mkdir -p $DEPLOY_DIR && tar xzf - -C $DEPLOY_DIR"
+
+      - name: Pull and restart
+        run: |
+          sshpass -e ssh -p "$VPS_PORT" "$VPS" bash -s <<EOF
+          set -euo pipefail
+          cd $DEPLOY_DIR
+          test -f .env || { echo "Brak ~/$DEPLOY_DIR/.env — utwórz go na podstawie .env.example"; exit 1; }
+          sed -i '/^BACKEND_IMAGE=/d' .env
+          echo "BACKEND_IMAGE=${{ steps.image.outputs.sha }}" >> .env
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
+          docker logout ghcr.io
+          docker image prune -f
+          EOF
+
+      - name: Wait for backend health
+        run: |
+          sshpass -e ssh -p "$VPS_PORT" "$VPS"             'for i in $(seq 1 30); do curl -fs http://127.0.0.1:8080/actuator/health && exit 0; sleep 5; done; exit 1'
