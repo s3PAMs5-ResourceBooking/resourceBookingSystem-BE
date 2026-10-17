@@ -21,5 +21,21 @@ jobs:
       - name: Build and test
         run: ./mvnw -B verify
 
+      - name: Test summary
+        if: always()
+        run: |
+          shopt -s nullglob
+          files=(target/surefire-reports/TEST-*.xml)
+          if [ ${#files[@]} -eq 0 ]; then echo "Brak raportów testów" >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          sum() { grep -ho "<testsuite [^>]*" "${files[@]}" | grep -o " $1=\"[0-9]*\"" | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}'; }
+          total=$(sum tests); failed=$(sum failures); errors=$(sum errors); skipped=$(sum skipped)
+          passed=$((total - failed - errors - skipped))
+          {
+            echo "### Wyniki testów"
+            echo "| ✅ Udane | ❌ Nieudane | 💥 Błędy | ⏭️ Pominięte | Razem |"
+            echo "|---|---|---|---|---|"
+            echo "| $passed | $failed | $errors | $skipped | $total |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Validate docker-compose
         run: docker compose config --quiet
